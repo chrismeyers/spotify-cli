@@ -11,6 +11,11 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/charmbracelet/bubbles/spinner"
+	"github.com/charmbracelet/bubbles/table"
+	"github.com/charmbracelet/bubbles/textinput"
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 type Config struct {
@@ -496,19 +501,200 @@ func (c *Client) search(s SearchQuery) (*SearchResults, error) {
 	return &results, nil
 }
 
+type choice struct {
+	name       string
+	searchType string
+	selected   bool
+}
+
+type model struct {
+	sub       chan SearchResults
+	client    Client
+	textInput textinput.Model
+	choices   []choice
+	cursor    int
+	spinner   spinner.Model
+	loading   bool
+	results   *SearchResults
+}
+
+func initialModel(config *Config) model {
+	client := NewClient(*config)
+
+	ti := textinput.New()
+	ti.Placeholder = ""
+	ti.Prompt = ""
+	ti.Focus()
+	ti.CharLimit = 156
+	ti.Width = 40
+
+	s := spinner.New()
+	s.Spinner = spinner.Dot
+
+	return model{
+		sub:       make(chan SearchResults),
+		client:    client,
+		textInput: ti,
+		choices: []choice{
+			{name: "Album", searchType: "album", selected: false},
+			{name: "Artist", searchType: "artist", selected: true},
+			{name: "Playlist", searchType: "playlist", selected: false},
+			{name: "Track", searchType: "track", selected: false},
+			{name: "Show", searchType: "show", selected: false},
+			{name: "Episode", searchType: "episode", selected: false},
+			{name: "Audiobook", searchType: "audiobook", selected: false},
+		},
+		spinner: s,
+		loading: false,
+	}
+}
+
+func waitForActivity(sub chan SearchResults) tea.Cmd {
+	return func() tea.Msg {
+		return SearchResults(<-sub)
+	}
+}
+
+func (m model) Init() tea.Cmd {
+	return waitForActivity(m.sub)
+}
+
+func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "ctrl+c":
+			return m, tea.Quit
+		case "up":
+			if m.cursor > 0 {
+				m.cursor--
+			}
+		case "down":
+			if m.cursor < len(m.choices)-1 {
+				m.cursor++
+			}
+		case "right", "left":
+			m.choices[m.cursor].selected = !m.choices[m.cursor].selected
+		case "enter":
+			m.results = nil
+			m.loading = !m.loading
+			cmd = m.spinner.Tick
+
+			var types []string
+			for _, choice := range m.choices {
+				if choice.selected == true {
+					types = append(types, choice.searchType)
+				}
+			}
+
+			input := m.textInput.Value()
+			typeStr := strings.Join(types, ",")
+
+			if input != "" && typeStr != "" {
+				go func() {
+					// TODO: add error handling
+					results, _ := m.client.search(SearchQuery{Q: input, Type: typeStr})
+					m.sub <- *results
+				}()
+			} else {
+				// TODO: handle error notification
+			}
+		default:
+			m.textInput, cmd = m.textInput.Update(msg)
+		}
+	case SearchResults:
+		m.loading = !m.loading
+		m.results = &msg
+		return m, waitForActivity(m.sub)
+	case spinner.TickMsg:
+		var cmd tea.Cmd
+		m.spinner, cmd = m.spinner.Update(msg)
+		return m, cmd
+	}
+
+	return m, cmd
+}
+
+func (m model) View() string {
+	s := "Search Spotify: "
+
+	s += m.textInput.View() + "\n\n"
+
+	for i, choice := range m.choices {
+		cursor := " "
+		if m.cursor == i {
+			cursor = ">"
+		}
+
+		checked := " "
+		if choice.selected {
+			checked = "x"
+		}
+
+		s += fmt.Sprintf("%s [%s] %s\n", cursor, checked, choice.name)
+	}
+
+	if m.loading {
+		s += fmt.Sprintf("\n%s Loading...\n", m.spinner.View())
+	}
+
+	if m.results != nil {
+		// TODO: make output nicer using tabs and lists or something
+		t := table.New(
+			table.WithColumns([]table.Column{
+				{Title: "Category", Width: 10},
+				{Title: "Hits", Width: 10},
+			}),
+			table.WithRows([]table.Row{
+				{"Albums", strconv.Itoa(m.results.Albums.Total)},
+				{"Artists", strconv.Itoa(m.results.Artists.Total)},
+				{"Playlists", strconv.Itoa(m.results.Playlists.Total)},
+				{"Tracks", strconv.Itoa(m.results.Tracks.Total)},
+				{"Shows", strconv.Itoa(m.results.Shows.Total)},
+				{"Episodes", strconv.Itoa(m.results.Episodes.Total)},
+				{"Audiobooks", strconv.Itoa(m.results.Audiobooks.Total)},
+			}),
+			table.WithHeight(7),
+			table.WithFocused(false),
+		)
+
+		t.Blur()
+
+		styles := table.DefaultStyles()
+		styles.Selected = styles.Selected.
+			Foreground(styles.Cell.GetForeground()).
+			Background(styles.Cell.GetBackground()).
+			Bold(false)
+
+		t.SetStyles(styles)
+
+		s += fmt.Sprintf("\n%s\n", t.View())
+	}
+
+	s += "\nPress Ctrl-C to quit.\n"
+
+	return s
+}
+
 func main() {
+	if len(os.Getenv("DEBUG")) > 0 {
+		f, err := tea.LogToFile("debug.log", "debug")
+		if err != nil {
+			panic(err)
+		}
+		defer f.Close()
+	}
+
 	config, err := loadConfig("./config.json")
 	if err != nil {
 		panic(err)
 	}
 	config.TokenPath = "./token.json"
 
-	client := NewClient(*config)
-
-	results, err := client.search(SearchQuery{Q: os.Args[1], Type: os.Args[2]})
-	if err != nil {
+	p := tea.NewProgram(initialModel(config))
+	if _, err := p.Run(); err != nil {
 		panic(err)
 	}
-
-	fmt.Printf("%+v", results)
 }
