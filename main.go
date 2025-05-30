@@ -578,10 +578,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "right", "left":
 			m.choices[m.cursor].selected = !m.choices[m.cursor].selected
 		case "enter":
-			m.results = nil
-			m.loading = !m.loading
-			cmd = m.spinner.Tick
-
 			var types []string
 			for _, choice := range m.choices {
 				if choice.selected == true {
@@ -593,6 +589,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			typeStr := strings.Join(types, ",")
 
 			if input != "" && typeStr != "" {
+				m.results = nil
+				m.loading = !m.loading
+				cmd = m.spinner.Tick
+
 				go func() {
 					// TODO: add error handling
 					results, _ := m.client.search(SearchQuery{Q: input, Type: typeStr})
