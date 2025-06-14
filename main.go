@@ -761,6 +761,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		m.resultList.SetItems(items)
+		m.resultList.Select(0)
 		m.view = ResultsView
 
 		return m, waitForActivity(m.sub)
