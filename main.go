@@ -16,6 +16,7 @@ import (
 	"github.com/charmbracelet/bubbles/table"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 type Config struct {
@@ -516,6 +517,7 @@ type model struct {
 	spinner   spinner.Model
 	loading   bool
 	results   *SearchResults
+	error     string
 }
 
 func initialModel(config *Config) model {
@@ -546,6 +548,7 @@ func initialModel(config *Config) model {
 		},
 		spinner: s,
 		loading: false,
+		error:   "",
 	}
 }
 
@@ -588,19 +591,24 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			input := m.textInput.Value()
 			typeStr := strings.Join(types, ",")
 
-			if input != "" && typeStr != "" {
-				m.results = nil
-				m.loading = !m.loading
-				cmd = m.spinner.Tick
-
-				go func() {
-					// TODO: add error handling
-					results, _ := m.client.search(SearchQuery{Q: input, Type: typeStr})
-					m.sub <- *results
-				}()
-			} else {
-				// TODO: handle error notification
+			if input == "" {
+				m.error = "Please enter a search term"
+				return m, nil
 			}
+			if typeStr == "" {
+				m.error = "Please select at least one category"
+				return m, nil
+			}
+
+			m.error = ""
+			m.results = nil
+			m.loading = !m.loading
+			cmd = m.spinner.Tick
+
+			go func() {
+				results, _ := m.client.search(SearchQuery{Q: input, Type: typeStr})
+				m.sub <- *results
+			}()
 		default:
 			m.textInput, cmd = m.textInput.Update(msg)
 		}
@@ -618,10 +626,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m model) View() string {
-	s := "Search Spotify: "
+	var s strings.Builder
 
-	s += m.textInput.View() + "\n\n"
+	// Header
+	s.WriteString("Spotify Search\n\n")
 
+	// Search input
+	s.WriteString("Search: ")
+	s.WriteString(m.textInput.View())
+	s.WriteString("\n\n")
+
+	// Search type selection
+	s.WriteString("Search Types:\n")
 	for i, choice := range m.choices {
 		cursor := " "
 		if m.cursor == i {
@@ -633,18 +649,25 @@ func (m model) View() string {
 			checked = "x"
 		}
 
-		s += fmt.Sprintf("%s [%s] %s\n", cursor, checked, choice.name)
+		s.WriteString(fmt.Sprintf("%s [%s] %s\n", cursor, checked, choice.name))
 	}
 
+	// Error message
+	if m.error != "" {
+		s.WriteString(fmt.Sprintf("\nError: %s\n", m.error))
+	}
+
+	// Loading indicator
 	if m.loading {
-		s += fmt.Sprintf("\n%s Loading...\n", m.spinner.View())
+		s.WriteString(fmt.Sprintf("\n%s Loading...\n", m.spinner.View()))
 	}
 
+	// Results
 	if m.results != nil {
-		// TODO: make output nicer using tabs and lists or something
+		s.WriteString("\nSearch Results:\n")
 		t := table.New(
 			table.WithColumns([]table.Column{
-				{Title: "Category", Width: 10},
+				{Title: "Category", Width: 15},
 				{Title: "Hits", Width: 10},
 			}),
 			table.WithRows([]table.Row{
@@ -670,12 +693,17 @@ func (m model) View() string {
 
 		t.SetStyles(styles)
 
-		s += fmt.Sprintf("\n%s\n", t.View())
+		s.WriteString(t.View())
+		s.WriteString("\n")
 	}
 
-	s += "\nPress Ctrl-C to quit.\n"
+	// Footer
+	footerStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#767676"))
 
-	return s
+	s.WriteString(footerStyle.Render("\nUse arrow keys to navigate and select categories, Enter to search."))
+	s.WriteString(footerStyle.Render("\nPress Ctrl-C to quit."))
+
+	return s.String()
 }
 
 func main() {
