@@ -721,7 +721,11 @@ func main() {
 	}
 	config.TokenPath = "./token.json"
 
-	p := tea.NewProgram(initialModel(config))
+	p := tea.NewProgram(
+		initialModel(config),
+		tea.WithAltScreen(),       // Enable full screen mode
+		tea.WithMouseCellMotion(), // Enable mouse support
+	)
 	if _, err := p.Run(); err != nil {
 		panic(err)
 	}
