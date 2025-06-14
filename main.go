@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/spinner"
-	"github.com/charmbracelet/bubbles/table"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -502,29 +502,57 @@ func (c *Client) search(s SearchQuery) (*SearchResults, error) {
 	return &results, nil
 }
 
+var (
+	docStyle      = lipgloss.NewStyle().Margin(1, 2)
+	categoryStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#1DB954")).Bold(true)
+	footerStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#767676")).Faint(true)
+)
+
 type choice struct {
 	name       string
 	searchType string
 	selected   bool
 }
 
+type resultItem struct {
+	category string
+	name     string
+	detail   string
+	url      string
+}
+
+func (i resultItem) Title() string { return i.name }
+func (i resultItem) Description() string {
+	return fmt.Sprintf("%s · %s", categoryStyle.Render(i.category), i.detail)
+}
+func (i resultItem) FilterValue() string { return i.name }
+
+type ViewState int
+
+const (
+	SearchView ViewState = iota
+	ResultsView
+)
+
 type model struct {
-	sub       chan SearchResults
-	client    Client
-	textInput textinput.Model
-	choices   []choice
-	cursor    int
-	spinner   spinner.Model
-	loading   bool
-	results   *SearchResults
-	error     string
+	sub        chan SearchResults
+	client     Client
+	textInput  textinput.Model
+	choices    []choice
+	cursor     int
+	spinner    spinner.Model
+	loading    bool
+	results    *SearchResults
+	resultList list.Model
+	error      string
+	view       ViewState
 }
 
 func initialModel(config *Config) model {
 	client := NewClient(*config)
 
 	ti := textinput.New()
-	ti.Placeholder = ""
+	ti.Placeholder = "Nirvana"
 	ti.Prompt = ""
 	ti.Focus()
 	ti.CharLimit = 156
@@ -533,22 +561,29 @@ func initialModel(config *Config) model {
 	s := spinner.New()
 	s.Spinner = spinner.Dot
 
+	items := []list.Item{}
+	l := list.New(items, list.NewDefaultDelegate(), 40, 2)
+	l.Title = "Search Results"
+	l.DisableQuitKeybindings()
+
 	return model{
 		sub:       make(chan SearchResults),
 		client:    client,
 		textInput: ti,
 		choices: []choice{
 			{name: "Album", searchType: "album", selected: false},
-			{name: "Artist", searchType: "artist", selected: true},
+			{name: "Artist", searchType: "artist", selected: false},
 			{name: "Playlist", searchType: "playlist", selected: false},
 			{name: "Track", searchType: "track", selected: false},
 			{name: "Show", searchType: "show", selected: false},
 			{name: "Episode", searchType: "episode", selected: false},
 			{name: "Audiobook", searchType: "audiobook", selected: false},
 		},
-		spinner: s,
-		loading: false,
-		error:   "",
+		spinner:    s,
+		loading:    false,
+		resultList: l,
+		error:      "",
+		view:       SearchView,
 	}
 }
 
@@ -571,72 +606,187 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+c":
 			return m, tea.Quit
 		case "up":
-			if m.cursor > 0 {
+			if m.view == SearchView && m.cursor > 0 {
 				m.cursor--
 			}
 		case "down":
-			if m.cursor < len(m.choices)-1 {
+			if m.view == SearchView && m.cursor < len(m.choices)-1 {
 				m.cursor++
 			}
 		case "right", "left":
-			m.choices[m.cursor].selected = !m.choices[m.cursor].selected
+			if m.view == SearchView {
+				m.choices[m.cursor].selected = !m.choices[m.cursor].selected
+			}
 		case "enter":
-			var types []string
-			for _, choice := range m.choices {
-				if choice.selected == true {
-					types = append(types, choice.searchType)
+			if m.view == SearchView {
+				var types []string
+				for _, choice := range m.choices {
+					if choice.selected == true {
+						types = append(types, choice.searchType)
+					}
+				}
+
+				input := m.textInput.Value()
+				typeStr := strings.Join(types, ",")
+
+				if input == "" {
+					m.error = "Please enter a search term"
+					return m, nil
+				}
+				if typeStr == "" {
+					m.error = "Please select at least one category"
+					return m, nil
+				}
+
+				m.error = ""
+				m.results = nil
+				m.loading = !m.loading
+				cmd = m.spinner.Tick
+
+				go func() {
+					results, _ := m.client.search(SearchQuery{Q: input, Type: typeStr})
+					m.sub <- *results
+				}()
+			}
+		case "esc":
+			if m.view == ResultsView {
+				if m.resultList.FilterState() == list.Filtering {
+					m.resultList.ResetFilter()
+				} else {
+					m.view = SearchView
+				}
+				return m, nil
+			}
+		default:
+			if m.view == SearchView {
+				m.textInput, cmd = m.textInput.Update(msg)
+			} else if m.view == ResultsView {
+				if msg.String() == "q" && m.resultList.FilterState() != list.Filtering {
+					m.view = SearchView
+					return m, nil
 				}
 			}
-
-			input := m.textInput.Value()
-			typeStr := strings.Join(types, ",")
-
-			if input == "" {
-				m.error = "Please enter a search term"
-				return m, nil
-			}
-			if typeStr == "" {
-				m.error = "Please select at least one category"
-				return m, nil
-			}
-
-			m.error = ""
-			m.results = nil
-			m.loading = !m.loading
-			cmd = m.spinner.Tick
-
-			go func() {
-				results, _ := m.client.search(SearchQuery{Q: input, Type: typeStr})
-				m.sub <- *results
-			}()
-		default:
-			m.textInput, cmd = m.textInput.Update(msg)
 		}
 	case SearchResults:
 		m.loading = !m.loading
 		m.results = &msg
+
+		const maxItems = 10
+
+		var items []list.Item
+		for i, a := range msg.Albums.Items {
+			if i >= maxItems {
+				break
+			}
+			artistNames := []string{}
+			for _, ar := range a.Artists {
+				artistNames = append(artistNames, ar.Name)
+			}
+			items = append(items, resultItem{
+				category: "Album",
+				name:     a.Name,
+				detail:   fmt.Sprintf("by %s · Released: %s", strings.Join(artistNames, ", "), a.ReleaseDate),
+				url:      a.ExternalUrls.Spotify,
+			})
+		}
+		for i, a := range msg.Artists.Items {
+			if i >= maxItems {
+				break
+			}
+			items = append(items, resultItem{
+				category: "Artist",
+				name:     a.Name,
+				detail:   fmt.Sprintf("Genres: %s", strings.Join(a.Genres, ", ")),
+				url:      a.ExternalUrls.Spotify,
+			})
+		}
+		for i, p := range msg.Playlists.Items {
+			if i >= maxItems {
+				break
+			}
+			items = append(items, resultItem{
+				category: "Playlist",
+				name:     p.Name,
+				detail:   fmt.Sprintf("by %s · %d tracks", p.Owner.DisplayName, p.Tracks.Total),
+				url:      p.ExternalUrls.Spotify,
+			})
+		}
+		for i, t := range msg.Tracks.Items {
+			if i >= maxItems {
+				break
+			}
+			artistNames := []string{}
+			for _, a := range t.Artists {
+				artistNames = append(artistNames, a.Name)
+			}
+			items = append(items, resultItem{
+				category: "Track",
+				name:     t.Name,
+				detail:   fmt.Sprintf("by %s · Album: %s", strings.Join(artistNames, ", "), t.Album.Name),
+				url:      t.ExternalUrls.Spotify,
+			})
+		}
+		for i, s := range msg.Shows.Items {
+			if i >= maxItems {
+				break
+			}
+			items = append(items, resultItem{
+				category: "Show",
+				name:     s.Name,
+				detail:   fmt.Sprintf("by %s", s.Publisher),
+				url:      s.ExternalUrls.Spotify,
+			})
+		}
+		for i, e := range msg.Episodes.Items {
+			if i >= maxItems {
+				break
+			}
+			items = append(items, resultItem{
+				category: "Episode",
+				name:     e.Name,
+				detail:   fmt.Sprintf("by %s", e.Name),
+				url:      e.ExternalUrls.Spotify,
+			})
+		}
+		for i, a := range msg.Audiobooks.Items {
+			if i >= maxItems {
+				break
+			}
+			items = append(items, resultItem{
+				category: "Audiobook",
+				name:     a.Name,
+				detail:   fmt.Sprintf("by %s", a.Authors[0].Name),
+				url:      a.ExternalUrls.Spotify,
+			})
+		}
+
+		m.resultList.SetItems(items)
+		m.view = ResultsView
+
 		return m, waitForActivity(m.sub)
 	case spinner.TickMsg:
 		var cmd tea.Cmd
 		m.spinner, cmd = m.spinner.Update(msg)
 		return m, cmd
+	case tea.WindowSizeMsg:
+		h, v := docStyle.GetFrameSize()
+		m.resultList.SetSize(msg.Width-h, msg.Height-v)
 	}
+
+	m.resultList, cmd = m.resultList.Update(msg)
 
 	return m, cmd
 }
 
-func (m model) View() string {
+func (m model) searchView() string {
 	var s strings.Builder
 
-	// Header
 	s.WriteString("Spotify Search\n\n")
 
-	// Search input
 	s.WriteString("Search: ")
 	s.WriteString(m.textInput.View())
 	s.WriteString("\n\n")
 
-	// Search type selection
 	s.WriteString("Search Types:\n")
 	for i, choice := range m.choices {
 		cursor := " "
@@ -652,58 +802,36 @@ func (m model) View() string {
 		s.WriteString(fmt.Sprintf("%s [%s] %s\n", cursor, checked, choice.name))
 	}
 
-	// Error message
 	if m.error != "" {
 		s.WriteString(fmt.Sprintf("\nError: %s\n", m.error))
 	}
 
-	// Loading indicator
 	if m.loading {
 		s.WriteString(fmt.Sprintf("\n%s Loading...\n", m.spinner.View()))
 	}
 
-	// Results
-	if m.results != nil {
-		s.WriteString("\nSearch Results:\n")
-		t := table.New(
-			table.WithColumns([]table.Column{
-				{Title: "Category", Width: 15},
-				{Title: "Hits", Width: 10},
-			}),
-			table.WithRows([]table.Row{
-				{"Albums", strconv.Itoa(m.results.Albums.Total)},
-				{"Artists", strconv.Itoa(m.results.Artists.Total)},
-				{"Playlists", strconv.Itoa(m.results.Playlists.Total)},
-				{"Tracks", strconv.Itoa(m.results.Tracks.Total)},
-				{"Shows", strconv.Itoa(m.results.Shows.Total)},
-				{"Episodes", strconv.Itoa(m.results.Episodes.Total)},
-				{"Audiobooks", strconv.Itoa(m.results.Audiobooks.Total)},
-			}),
-			table.WithHeight(7),
-			table.WithFocused(false),
-		)
-
-		t.Blur()
-
-		styles := table.DefaultStyles()
-		styles.Selected = styles.Selected.
-			Foreground(styles.Cell.GetForeground()).
-			Background(styles.Cell.GetBackground()).
-			Bold(false)
-
-		t.SetStyles(styles)
-
-		s.WriteString(t.View())
-		s.WriteString("\n")
-	}
-
-	// Footer
-	footerStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#767676"))
-
-	s.WriteString(footerStyle.Render("\nUse arrow keys to navigate and select categories, Enter to search."))
+	s.WriteString(footerStyle.Render("\nUse arrow keys to select categories and Enter to search."))
 	s.WriteString(footerStyle.Render("\nPress Ctrl-C to quit."))
 
 	return s.String()
+}
+
+func (m model) resultsView() string {
+	var s strings.Builder
+
+	s.WriteString("\n")
+	s.WriteString(m.resultList.View())
+
+	s.WriteString(footerStyle.Render("\nPress 'q' or 'esc' to go back. Press Ctrl-C to quit."))
+
+	return s.String()
+}
+
+func (m model) View() string {
+	if m.view == ResultsView {
+		return m.resultsView()
+	}
+	return m.searchView()
 }
 
 func main() {
