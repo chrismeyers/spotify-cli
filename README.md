@@ -15,7 +15,14 @@ To use this tool, you need a Spotify Developer account:
 
 ### 2. Create `config.json`
 
-Create a file named `config.json` in the project root with the following structure:
+The program will look for your `config.json` in several common locations.
+You can place it in any of the following paths:
+
+- `$XDG_CONFIG_HOME/spotify-cli/config.json`
+- `$HOME/.config/spotify-cli/config.json`
+- `./config.json` (current directory)
+
+Create the file with the following structure:
 
 ```json
 {
@@ -33,12 +40,12 @@ Replace `YOUR_CLIENT_ID` and `YOUR_CLIENT_SECRET` with your actual credentials.
 Make sure you have Go installed (1.24+ recommended):
 
 ```sh
-go run .
+go build -o spotify-cli
+./spotify-cli
 ```
 
 or
 
 ```sh
-go build -o spotify-cli
-./spotify-cli
+go run .
 ```

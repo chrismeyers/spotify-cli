@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/list"
@@ -380,11 +381,27 @@ func main() {
 		defer f.Close()
 	}
 
-	config, err := loadConfig("./config.json")
-	if err != nil {
-		panic(err)
+	possiblePaths := []string{
+		os.Getenv("XDG_CONFIG_HOME") + "/spotify-cli/config.json",
+		os.Getenv("HOME") + "/.config/spotify-cli/config.json",
+		"./config.json",
 	}
-	config.TokenPath = "./token.json"
+
+	var config *Config
+	var err error
+	for _, path := range possiblePaths {
+		if _, statErr := os.Stat(path); statErr == nil {
+			config, err = loadConfig(path)
+			if err != nil {
+				panic(err)
+			}
+			config.TokenPath = filepath.Dir(path) + "/token.json"
+			break
+		}
+	}
+	if config == nil {
+		panic("config.json not found in any common location")
+	}
 
 	p := tea.NewProgram(
 		initialModel(config),
