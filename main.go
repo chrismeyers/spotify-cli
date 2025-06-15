@@ -232,16 +232,16 @@ func (k categoryKeyMap) FullHelp() [][]key.Binding {
 
 var categoryKeys = categoryKeyMap{
 	Up: key.NewBinding(
-		key.WithKeys("up"),
-		key.WithHelp("↑", "move up"),
+		key.WithKeys("up", "k"),
+		key.WithHelp("↑/k", "move up"),
 	),
 	Down: key.NewBinding(
-		key.WithKeys("down"),
-		key.WithHelp("↓", "move down"),
+		key.WithKeys("down", "j"),
+		key.WithHelp("↓/j", "move down"),
 	),
 	Select: key.NewBinding(
-		key.WithKeys("space", "right", "left"),
-		key.WithHelp("space/→/←", "toggle selection"),
+		key.WithKeys("space"),
+		key.WithHelp("space", "toggle selection"),
 	),
 	Toggle: key.NewBinding(
 		key.WithKeys("tab"),
@@ -312,24 +312,24 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.textInput.Focus()
 				}
 			}
-		case "up":
+		case "up", "k":
 			if m.view == SearchView && !m.searchFocused && m.cursor > 0 {
 				m.cursor--
+			} else {
+				m.textInput, cmd = m.textInput.Update(msg)
 			}
-		case "down":
+		case "down", "j":
 			if m.view == SearchView && !m.searchFocused && m.cursor < len(m.choices)-1 {
 				m.cursor++
+			} else {
+				m.textInput, cmd = m.textInput.Update(msg)
 			}
-		case "right", "left":
-			if m.view == SearchView {
-				if m.searchFocused {
-					if m.textInput.Value() == "" {
-						m.textInput.SetValue(m.textInput.Placeholder)
-					} else {
-						m.textInput, cmd = m.textInput.Update(msg)
-					}
+		case "right":
+			if m.view == SearchView && m.searchFocused {
+				if m.textInput.Value() == "" {
+					m.textInput.SetValue(m.textInput.Placeholder)
 				} else {
-					m.choices[m.cursor].selected = !m.choices[m.cursor].selected
+					m.textInput, cmd = m.textInput.Update(msg)
 				}
 			}
 		case " ": // space key
