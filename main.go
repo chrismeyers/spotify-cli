@@ -3,9 +3,11 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"math/rand"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/spinner"
@@ -42,6 +44,45 @@ var (
 	categoryStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#1DB954")).Bold(true)
 	footerStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#767676")).Faint(true)
 )
+
+var bands = []string{
+	"The Beatles", "Led Zeppelin", "Pink Floyd", "Queen", "The Rolling Stones",
+	"Nirvana", "Radiohead", "AC/DC", "The Who", "Black Sabbath",
+	"Deep Purple", "Metallica", "Iron Maiden", "The Doors", "Jimi Hendrix",
+	"Bob Dylan", "David Bowie", "The Clash", "Sex Pistols", "Ramones",
+	"Pearl Jam", "Soundgarden", "Alice in Chains", "Red Hot Chili Peppers",
+	"Foo Fighters", "Green Day", "U2", "R.E.M.", "The Smiths",
+	"Joy Division", "New Order", "Depeche Mode", "The Cure", "Blur",
+	"Oasis", "Coldplay", "Arctic Monkeys", "The Strokes", "The White Stripes",
+	"Kings of Leon", "Arcade Fire", "Vampire Weekend", "Tame Impala",
+	"Fleetwood Mac", "Eagles", "Lynyrd Skynyrd", "Creedence Clearwater Revival",
+}
+
+var songs = []string{
+	"Bohemian Rhapsody", "Stairway to Heaven", "Hotel California", "Imagine",
+	"Smells Like Teen Spirit", "Sweet Child O' Mine", "Billie Jean",
+	"Like a Rolling Stone", "Purple Haze", "Hey Jude", "What's Going On",
+	"Born to Run", "Good Vibrations", "Respect", "Johnny B. Goode",
+	"Satisfaction", "My Generation", "God Only Knows", "A Change Is Gonna Come",
+	"Dancing Queen", "Don't Stop Believin'", "Sweet Caroline", "Piano Man",
+	"Wonderwall", "Creep", "Losing My Religion", "Black", "Everlong",
+	"Mr. Brightside", "Seven Nation Army", "Crazy", "Hallelujah",
+	"The Sound of Silence", "Bridge Over Troubled Water", "Yesterday",
+	"What a Wonderful World", "Unchained Melody", "Stand by Me",
+	"Lean on Me", "I Want to Hold Your Hand", "Help!", "Come As You Are",
+	"Enter Sandman", "Sweet Dreams", "Take On Me", "Don't Stop Me Now",
+	"We Will Rock You", "We Are the Champions", "Another Brick in the Wall",
+}
+
+func getRandomSearchTerm() string {
+	r := rand.New(rand.NewSource(time.Now().UnixNano()))
+
+	allItems := make([]string, 0, len(bands)+len(songs))
+	allItems = append(allItems, bands...)
+	allItems = append(allItems, songs...)
+
+	return allItems[r.Intn(len(allItems))]
+}
 
 type choice struct {
 	name       string
@@ -87,7 +128,7 @@ func initialModel(config *Config) model {
 	client := NewClient(*config)
 
 	ti := textinput.New()
-	ti.Placeholder = "Nirvana"
+	ti.Placeholder = getRandomSearchTerm()
 	ti.Prompt = ""
 	ti.Focus()
 	ti.CharLimit = 156
