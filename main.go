@@ -774,7 +774,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.resultList.SetSize(msg.Width-h, msg.Height-v)
 	}
 
-	m.resultList, cmd = m.resultList.Update(msg)
+	if m.view == ResultsView {
+		m.resultList, cmd = m.resultList.Update(msg)
+	}
 
 	return m, cmd
 }
