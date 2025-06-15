@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/help"
+	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
@@ -42,7 +44,6 @@ func loadConfig(path string) (*Config, error) {
 var (
 	docStyle          = lipgloss.NewStyle().Margin(1, 2)
 	categoryStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("#1DB954")).Bold(true)
-	footerStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("#767676")).Faint(true)
 	focusedTitleStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#1DB954")).Bold(true)
 	normalTitleStyle  = lipgloss.NewStyle().Bold(true)
 )
@@ -125,6 +126,7 @@ type model struct {
 	error         string
 	view          ViewState
 	searchFocused bool
+	help          help.Model
 }
 
 func initialModel(config *Config) model {
@@ -145,6 +147,9 @@ func initialModel(config *Config) model {
 	l.Title = "Search Results"
 	l.DisableQuitKeybindings()
 
+	h := help.New()
+	h.ShowAll = true
+
 	return model{
 		sub:       make(chan SearchResults),
 		client:    client,
@@ -164,7 +169,119 @@ func initialModel(config *Config) model {
 		error:         "",
 		view:          SearchView,
 		searchFocused: true,
+		help:          h,
 	}
+}
+
+type searchKeyMap struct {
+	Accept key.Binding
+	Toggle key.Binding
+	Search key.Binding
+	Quit   key.Binding
+}
+
+func (k searchKeyMap) ShortHelp() []key.Binding {
+	return []key.Binding{k.Quit}
+}
+
+func (k searchKeyMap) FullHelp() [][]key.Binding {
+	return [][]key.Binding{
+		{k.Accept},
+		{k.Toggle, k.Search, k.Quit},
+	}
+}
+
+var searchKeys = searchKeyMap{
+	Accept: key.NewBinding(
+		key.WithKeys("right", "l"),
+		key.WithHelp("→", "accept placeholder"),
+	),
+	Toggle: key.NewBinding(
+		key.WithKeys("tab"),
+		key.WithHelp("tab", "toggle input focus"),
+	),
+	Search: key.NewBinding(
+		key.WithKeys("enter"),
+		key.WithHelp("enter", "submit search"),
+	),
+	Quit: key.NewBinding(
+		key.WithKeys("ctrl+c"),
+		key.WithHelp("ctrl+c", "quit"),
+	),
+}
+
+type categoryKeyMap struct {
+	Up     key.Binding
+	Down   key.Binding
+	Select key.Binding
+	Toggle key.Binding
+	Search key.Binding
+	Quit   key.Binding
+}
+
+func (k categoryKeyMap) ShortHelp() []key.Binding {
+	return []key.Binding{k.Quit}
+}
+
+func (k categoryKeyMap) FullHelp() [][]key.Binding {
+	return [][]key.Binding{
+		{k.Up, k.Down, k.Select},
+		{k.Toggle, k.Search, k.Quit},
+	}
+}
+
+var categoryKeys = categoryKeyMap{
+	Up: key.NewBinding(
+		key.WithKeys("up"),
+		key.WithHelp("↑", "move up"),
+	),
+	Down: key.NewBinding(
+		key.WithKeys("down"),
+		key.WithHelp("↓", "move down"),
+	),
+	Select: key.NewBinding(
+		key.WithKeys("space", "right", "left"),
+		key.WithHelp("space/→/←", "toggle selection"),
+	),
+	Toggle: key.NewBinding(
+		key.WithKeys("tab"),
+		key.WithHelp("tab", "toggle input focus"),
+	),
+	Search: key.NewBinding(
+		key.WithKeys("enter"),
+		key.WithHelp("enter", "submit search"),
+	),
+	Quit: key.NewBinding(
+		key.WithKeys("ctrl+c"),
+		key.WithHelp("ctrl+c", "quit"),
+	),
+}
+
+type resultsKeyMap struct {
+	Back key.Binding
+	Quit key.Binding
+}
+
+func (k resultsKeyMap) ShortHelp() []key.Binding {
+	return []key.Binding{k.Quit}
+}
+
+func (k resultsKeyMap) FullHelp() [][]key.Binding {
+	return [][]key.Binding{
+		{k.Back},
+		{k.Quit},
+	}
+}
+
+var resultsKeys = resultsKeyMap{
+	Back: key.NewBinding(
+		key.WithKeys("esc", "q"),
+		key.WithHelp("esc/q", "go back"),
+	),
+	Quit: key.NewBinding(
+		key.WithKeys("ctrl+c"),
+		key.WithHelp("ctrl+c", "quit"),
+	),
 }
 
 func waitForActivity(sub chan SearchResults) tea.Cmd {
@@ -428,9 +545,12 @@ func (m model) searchView() string {
 		s.WriteString(fmt.Sprintf("\n%s Loading...\n", m.spinner.View()))
 	}
 
-	s.WriteString(footerStyle.Render("\nPress Tab to change focus, Enter to search. Press Ctrl-C to quit."))
-	s.WriteString(footerStyle.Render("\nSearch: → accept placeholder"))
-	s.WriteString(footerStyle.Render("\nCategories: ↑/↓ navigate • Space/→/← select"))
+	s.WriteString("\n\n")
+	if m.searchFocused {
+		s.WriteString(m.help.View(searchKeys))
+	} else {
+		s.WriteString(m.help.View(categoryKeys))
+	}
 
 	return s.String()
 }
@@ -441,7 +561,8 @@ func (m model) resultsView() string {
 	s.WriteString("\n")
 	s.WriteString(m.resultList.View())
 
-	s.WriteString(footerStyle.Render("\nPress 'q' or 'esc' to go back. Press Ctrl-C to quit."))
+	s.WriteString("\n\n")
+	s.WriteString(m.help.View(resultsKeys))
 
 	return s.String()
 }
