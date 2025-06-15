@@ -40,9 +40,11 @@ func loadConfig(path string) (*Config, error) {
 }
 
 var (
-	docStyle      = lipgloss.NewStyle().Margin(1, 2)
-	categoryStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#1DB954")).Bold(true)
-	footerStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#767676")).Faint(true)
+	docStyle          = lipgloss.NewStyle().Margin(1, 2)
+	categoryStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("#1DB954")).Bold(true)
+	footerStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("#767676")).Faint(true)
+	focusedTitleStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#1DB954")).Bold(true)
+	normalTitleStyle  = lipgloss.NewStyle().Bold(true)
 )
 
 var bands = []string{
@@ -111,17 +113,18 @@ const (
 )
 
 type model struct {
-	sub        chan SearchResults
-	client     Client
-	textInput  textinput.Model
-	choices    []choice
-	cursor     int
-	spinner    spinner.Model
-	loading    bool
-	results    *SearchResults
-	resultList list.Model
-	error      string
-	view       ViewState
+	sub           chan SearchResults
+	client        Client
+	textInput     textinput.Model
+	choices       []choice
+	cursor        int
+	spinner       spinner.Model
+	loading       bool
+	results       *SearchResults
+	resultList    list.Model
+	error         string
+	view          ViewState
+	searchFocused bool
 }
 
 func initialModel(config *Config) model {
@@ -155,11 +158,12 @@ func initialModel(config *Config) model {
 			{name: "Episode", searchType: "episode", selected: false},
 			{name: "Audiobook", searchType: "audiobook", selected: false},
 		},
-		spinner:    s,
-		loading:    false,
-		resultList: l,
-		error:      "",
-		view:       SearchView,
+		spinner:       s,
+		loading:       false,
+		resultList:    l,
+		error:         "",
+		view:          SearchView,
+		searchFocused: true,
 	}
 }
 
@@ -181,17 +185,43 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "ctrl+c":
 			return m, tea.Quit
+		case "tab":
+			if m.view == SearchView {
+				if m.searchFocused {
+					m.searchFocused = false
+					m.textInput.Blur()
+				} else {
+					m.searchFocused = true
+					m.textInput.Focus()
+				}
+			}
 		case "up":
-			if m.view == SearchView && m.cursor > 0 {
+			if m.view == SearchView && !m.searchFocused && m.cursor > 0 {
 				m.cursor--
 			}
 		case "down":
-			if m.view == SearchView && m.cursor < len(m.choices)-1 {
+			if m.view == SearchView && !m.searchFocused && m.cursor < len(m.choices)-1 {
 				m.cursor++
 			}
 		case "right", "left":
 			if m.view == SearchView {
-				m.choices[m.cursor].selected = !m.choices[m.cursor].selected
+				if m.searchFocused {
+					if m.textInput.Value() == "" {
+						m.textInput.SetValue(m.textInput.Placeholder)
+					} else {
+						m.textInput, cmd = m.textInput.Update(msg)
+					}
+				} else {
+					m.choices[m.cursor].selected = !m.choices[m.cursor].selected
+				}
+			}
+		case " ": // space key
+			if m.view == SearchView {
+				if m.searchFocused {
+					m.textInput, cmd = m.textInput.Update(msg)
+				} else {
+					m.choices[m.cursor].selected = !m.choices[m.cursor].selected
+				}
 			}
 		case "enter":
 			if m.view == SearchView {
@@ -234,7 +264,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 		default:
-			if m.view == SearchView {
+			if m.view == SearchView && m.searchFocused {
 				m.textInput, cmd = m.textInput.Update(msg)
 			} else if m.view == ResultsView {
 				if msg.String() == "q" && m.resultList.FilterState() != list.Filtering {
@@ -362,14 +392,23 @@ func (m model) searchView() string {
 
 	s.WriteString("Spotify Search\n\n")
 
-	s.WriteString("Search: ")
+	searchStyle := normalTitleStyle
+	if m.searchFocused {
+		searchStyle = focusedTitleStyle
+	}
+	s.WriteString(searchStyle.Render("Search: "))
 	s.WriteString(m.textInput.View())
 	s.WriteString("\n\n")
 
-	s.WriteString("Search Types:\n")
+	typesStyle := normalTitleStyle
+	if !m.searchFocused {
+		typesStyle = focusedTitleStyle
+	}
+	s.WriteString(typesStyle.Render("Categories:"))
+	s.WriteString("\n")
 	for i, choice := range m.choices {
 		cursor := " "
-		if m.cursor == i {
+		if m.cursor == i && !m.searchFocused {
 			cursor = ">"
 		}
 
@@ -389,8 +428,9 @@ func (m model) searchView() string {
 		s.WriteString(fmt.Sprintf("\n%s Loading...\n", m.spinner.View()))
 	}
 
-	s.WriteString(footerStyle.Render("\nUse arrow keys to select categories and Enter to search."))
-	s.WriteString(footerStyle.Render("\nPress Ctrl-C to quit."))
+	s.WriteString(footerStyle.Render("\nPress Tab to change focus, Enter to search. Press Ctrl-C to quit."))
+	s.WriteString(footerStyle.Render("\nSearch: → accept placeholder"))
+	s.WriteString(footerStyle.Render("\nCategories: ↑/↓ navigate • Space/→/← select"))
 
 	return s.String()
 }
