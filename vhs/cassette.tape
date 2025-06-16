@@ -10,6 +10,7 @@ Enter
 Sleep 1s
 Type "Nirvana"
 Sleep 1s
+Screenshot vhs/thumbnail.png
 Tab
 Sleep 1s
 Down
