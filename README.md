@@ -3,6 +3,8 @@
 A command-line interface (CLI) tool for interacting with the Spotify Web API.
 Use it to search Spotify from your terminal.
 
+![Demo](vhs/demo.gif)
+
 ## Getting Started
 
 ### 1. Get Spotify API Credentials
