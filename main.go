@@ -344,7 +344,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.view == SearchView {
 				var types []string
 				for _, choice := range m.choices {
-					if choice.selected == true {
+					if choice.selected {
 						types = append(types, choice.searchType)
 					}
 				}

@@ -417,6 +417,9 @@ func (c *Client) fetchToken() (*Token, error) {
 	}
 
 	err = os.WriteFile(c.Config.TokenPath, tokenStr, 0644)
+	if err != nil {
+		return nil, err
+	}
 
 	return &token, nil
 }
